@@ -1,0 +1,72 @@
+name: Build Video Splitter for Windows
+
+on:
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: windows-latest
+
+    steps:
+      - name: Download source
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install PyInstaller
+        run: python -m pip install --upgrade pip pyinstaller
+
+      - name: Download FFmpeg for Windows
+        shell: pwsh
+        run: |
+          Invoke-WebRequest `
+            -Uri "https://www.gyan.dev/ffmpeg/builds/ffmpeg-release-essentials.zip" `
+            -OutFile "$env:RUNNER_TEMP\ffmpeg.zip"
+          Expand-Archive `
+            -Path "$env:RUNNER_TEMP\ffmpeg.zip" `
+            -DestinationPath "$env:RUNNER_TEMP\ffmpeg" `
+            -Force
+          $ffmpeg = Get-ChildItem "$env:RUNNER_TEMP\ffmpeg" -Recurse -Filter "ffmpeg.exe" | Select-Object -First 1
+          $ffprobe = Get-ChildItem "$env:RUNNER_TEMP\ffmpeg" -Recurse -Filter "ffprobe.exe" | Select-Object -First 1
+          if (-not $ffmpeg -or -not $ffprobe) {
+            throw "No se encontraron ffmpeg.exe y ffprobe.exe"
+          }
+          Copy-Item $ffmpeg.FullName ".\ffmpeg.exe"
+          Copy-Item $ffprobe.FullName ".\ffprobe.exe"
+
+      - name: Build Windows executable
+        run: >
+          pyinstaller --noconfirm --clean --onefile --windowed
+          --name VideoSplitter
+          --add-binary "ffmpeg.exe;."
+          --add-binary "ffprobe.exe;."
+          video_splitter.py
+
+      - name: Package executable
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path "VideoSplitter-Windows" | Out-Null
+          Copy-Item "dist\VideoSplitter.exe" "VideoSplitter-Windows\VideoSplitter.exe"
+          @"
+          VIDEO SPLITTER - WINDOWS
+
+          1. Descomprime esta carpeta.
+          2. Haz doble clic en VideoSplitter.exe.
+          3. Selecciona el video, la carpeta de destino y la duración de cada parte.
+
+          FFmpeg y FFprobe están incluidos dentro del ejecutable.
+          No necesitas instalar Python ni FFmpeg.
+
+          Nota: La primera apertura puede tardar unos segundos mientras Windows inicia
+          los componentes incluidos.
+          "@ | Set-Content "VideoSplitter-Windows\LEEME.txt" -Encoding UTF8
+          Compress-Archive -Path "VideoSplitter-Windows\*" -DestinationPath "VideoSplitter-Windows.zip" -Force
+
+      - name: Upload Windows build
+        uses: actions/upload-artifact@v4
+        with:
+          name: VideoSplitter-Windows
+          path: VideoSplitter-Windows.zip
